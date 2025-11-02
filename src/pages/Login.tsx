@@ -1,14 +1,35 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
 
 function Login() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('Login with:', { email, password });
+    setError('');
+    setLoading(true);
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) throw error;
+
+      if (data.user) {
+        navigate('/dashboard');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to login');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -17,6 +38,12 @@ function Login() {
         <h1 className="text-5xl font-bold text-blue-600 text-center">
           Login
         </h1>
+
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg">
+            {error}
+          </div>
+        )}
 
         <form onSubmit={handleLogin} className="space-y-6">
           <div className="space-y-2">
@@ -51,16 +78,25 @@ function Login() {
 
           <button
             type="submit"
-            className="w-full px-12 py-4 bg-blue-600 text-white text-xl font-semibold rounded-xl shadow-lg hover:shadow-xl hover:bg-blue-700 hover:scale-105 transition-all duration-300 mt-8"
+            disabled={loading}
+            className="w-full px-12 py-4 bg-blue-600 text-white text-xl font-semibold rounded-xl shadow-lg hover:shadow-xl hover:bg-blue-700 hover:scale-105 transition-all duration-300 mt-8 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
           >
-            Login
+            {loading ? 'Logging in...' : 'Login'}
           </button>
         </form>
 
-        <div className="text-center">
+        <div className="text-center space-y-3">
           <button
+            type="button"
+            onClick={() => navigate('/signup')}
+            className="text-blue-600 hover:text-blue-700 font-semibold text-lg hover:underline block w-full"
+          >
+            Don't have an account? Sign up
+          </button>
+          <button
+            type="button"
             onClick={() => navigate('/')}
-            className="text-blue-600 hover:text-blue-700 font-semibold text-lg hover:underline"
+            className="text-blue-600 hover:text-blue-700 font-semibold text-lg hover:underline block w-full"
           >
             Back to Home
           </button>

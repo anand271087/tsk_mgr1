@@ -1,15 +1,41 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { supabase } from '../lib/supabase';
 
 function Signup() {
   const navigate = useNavigate();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSignup = (e: React.FormEvent) => {
+  const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log('Signup with:', { name, email, password });
+    setError('');
+    setLoading(true);
+
+    try {
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            name,
+          },
+        },
+      });
+
+      if (error) throw error;
+
+      if (data.user) {
+        navigate('/dashboard');
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to sign up');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -18,6 +44,12 @@ function Signup() {
         <h1 className="text-5xl font-bold text-blue-600 text-center">
           Create Account
         </h1>
+
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg">
+            {error}
+          </div>
+        )}
 
         <form onSubmit={handleSignup} className="space-y-6">
           <div className="space-y-2">
@@ -67,16 +99,25 @@ function Signup() {
 
           <button
             type="submit"
-            className="w-full px-12 py-4 bg-blue-600 text-white text-xl font-semibold rounded-xl shadow-lg hover:shadow-xl hover:bg-blue-700 hover:scale-105 transition-all duration-300 mt-8"
+            disabled={loading}
+            className="w-full px-12 py-4 bg-blue-600 text-white text-xl font-semibold rounded-xl shadow-lg hover:shadow-xl hover:bg-blue-700 hover:scale-105 transition-all duration-300 mt-8 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
           >
-            Signup
+            {loading ? 'Creating account...' : 'Signup'}
           </button>
         </form>
 
-        <div className="text-center">
+        <div className="text-center space-y-3">
           <button
+            type="button"
+            onClick={() => navigate('/login')}
+            className="text-blue-600 hover:text-blue-700 font-semibold text-lg hover:underline block w-full"
+          >
+            Already have an account? Login
+          </button>
+          <button
+            type="button"
             onClick={() => navigate('/')}
-            className="text-blue-600 hover:text-blue-700 font-semibold text-lg hover:underline"
+            className="text-blue-600 hover:text-blue-700 font-semibold text-lg hover:underline block w-full"
           >
             Back to Home
           </button>
