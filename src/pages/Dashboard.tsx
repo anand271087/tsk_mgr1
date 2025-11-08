@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { Loader2, Sparkles } from 'lucide-react';
+import { Loader2, Sparkles, Search } from 'lucide-react';
 import Profile from '../components/Profile';
 
 interface Task {
@@ -10,6 +10,14 @@ interface Task {
   priority: 'low' | 'medium' | 'high';
   status: 'pending' | 'in-progress' | 'done';
   created_at: string;
+}
+
+interface SearchResult {
+  id: string;
+  title: string;
+  priority: string;
+  status: string;
+  similarity: number;
 }
 
 interface Subtask {
@@ -31,6 +39,9 @@ function Dashboard() {
   const [generatingSubtasks, setGeneratingSubtasks] = useState<string | null>(null);
   const [suggestedSubtasks, setSuggestedSubtasks] = useState<Record<string, string[]>>({});
   const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
 
   useEffect(() => {
     checkUser();
@@ -92,7 +103,7 @@ function Dashboard() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
-      const { error } = await supabase
+      const { data: insertedTask, error } = await supabase
         .from('tasks')
         .insert([
           {
@@ -100,15 +111,41 @@ function Dashboard() {
             priority,
             user_id: user.id,
           },
-        ]);
+        ])
+        .select()
+        .single();
 
       if (error) throw error;
+
+      if (insertedTask) {
+        await generateTaskEmbedding(insertedTask.id, insertedTask.title);
+      }
 
       setNewTask('');
       setPriority('medium');
       fetchTasks();
     } catch (err: any) {
       setError(err.message);
+    }
+  };
+
+  const generateTaskEmbedding = async (taskId: string, taskTitle: string) => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-task-embedding`;
+
+      await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ taskId, taskTitle }),
+      });
+    } catch (err: any) {
+      console.error('Error generating embedding:', err.message);
     }
   };
 
@@ -244,6 +281,43 @@ function Dashboard() {
     });
   };
 
+  const handleSearch = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+
+    setSearching(true);
+    setError('');
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/semantic-search`;
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ query: searchQuery }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Search failed');
+      }
+
+      const { results } = await response.json();
+      setSearchResults(results || []);
+    } catch (err: any) {
+      setError(err.message);
+      setSearchResults([]);
+    } finally {
+      setSearching(false);
+    }
+  };
+
   const handleLogout = async () => {
     await supabase.auth.signOut();
     navigate('/');
@@ -284,6 +358,76 @@ function Dashboard() {
               <h1 className="text-5xl font-bold text-blue-600 text-center mb-8">
                 Your Tasks
               </h1>
+
+              <form onSubmit={handleSearch} className="space-y-4 bg-blue-50 p-6 rounded-xl">
+                <div className="space-y-2">
+                  <label htmlFor="smartSearch" className="block text-lg font-semibold text-gray-700">
+                    Smart Search
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      id="smartSearch"
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="flex-1 px-4 py-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:outline-none text-gray-700 text-lg transition-colors"
+                      placeholder="Search for similar tasks..."
+                    />
+                    <button
+                      type="submit"
+                      disabled={searching || !searchQuery.trim()}
+                      className="px-6 py-3 bg-blue-600 text-white text-lg font-semibold rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                    >
+                      {searching ? (
+                        <>
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                          Searching...
+                        </>
+                      ) : (
+                        <>
+                          <Search className="w-5 h-5" />
+                          Search
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {searchResults.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold text-gray-700">Similar Tasks Found:</p>
+                    <ul className="space-y-2">
+                      {searchResults.map((result) => (
+                        <li
+                          key={result.id}
+                          className="bg-white rounded-lg p-4 flex items-center justify-between gap-4 shadow-sm"
+                        >
+                          <div className="flex-1">
+                            <p className="text-gray-800 font-medium">{result.title}</p>
+                            <div className="flex items-center gap-2 mt-1">
+                              <span className={`px-2 py-1 rounded-full text-xs font-semibold border ${getPriorityColor(result.priority)}`}>
+                                {result.priority.charAt(0).toUpperCase() + result.priority.slice(1)}
+                              </span>
+                              <span className={`px-2 py-1 rounded-lg text-xs font-semibold ${getStatusColor(result.status)}`}>
+                                {result.status}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="text-sm text-gray-600">
+                            {Math.round(result.similarity * 100)}% match
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {searchResults.length === 0 && searchQuery && !searching && (
+                  <p className="text-sm text-gray-600 text-center py-2">
+                    No similar tasks found. Try a different search term.
+                  </p>
+                )}
+              </form>
 
           {error && (
             <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg">
