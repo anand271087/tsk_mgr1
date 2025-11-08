@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { Loader2, Sparkles } from 'lucide-react';
 
 interface Task {
   id: string;
@@ -10,17 +11,30 @@ interface Task {
   created_at: string;
 }
 
+interface Subtask {
+  id: string;
+  task_id: string;
+  title: string;
+  completed: boolean;
+  created_at: string;
+}
+
 function Dashboard() {
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [subtasks, setSubtasks] = useState<Record<string, Subtask[]>>({});
   const [newTask, setNewTask] = useState('');
   const [priority, setPriority] = useState<'low' | 'medium' | 'high'>('medium');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [generatingSubtasks, setGeneratingSubtasks] = useState<string | null>(null);
+  const [suggestedSubtasks, setSuggestedSubtasks] = useState<Record<string, string[]>>({});
+  const [expandedTasks, setExpandedTasks] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     checkUser();
     fetchTasks();
+    fetchAllSubtasks();
   }, []);
 
   const checkUser = async () => {
@@ -43,6 +57,29 @@ function Dashboard() {
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchAllSubtasks = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('subtasks')
+        .select('*')
+        .order('created_at', { ascending: true });
+
+      if (error) throw error;
+
+      const subtasksByTask: Record<string, Subtask[]> = {};
+      data?.forEach((subtask) => {
+        if (!subtasksByTask[subtask.task_id]) {
+          subtasksByTask[subtask.task_id] = [];
+        }
+        subtasksByTask[subtask.task_id].push(subtask);
+      });
+
+      setSubtasks(subtasksByTask);
+    } catch (err: any) {
+      console.error('Error fetching subtasks:', err.message);
     }
   };
 
@@ -97,9 +134,113 @@ function Dashboard() {
 
       if (error) throw error;
       fetchTasks();
+      fetchAllSubtasks();
     } catch (err: any) {
       setError(err.message);
     }
+  };
+
+  const generateSubtasks = async (taskId: string, taskTitle: string) => {
+    setGeneratingSubtasks(taskId);
+    setError('');
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('Not authenticated');
+
+      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/generate-subtasks`;
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ taskTitle }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to generate subtasks');
+      }
+
+      const { subtasks: suggested } = await response.json();
+      setSuggestedSubtasks(prev => ({ ...prev, [taskId]: suggested }));
+      setExpandedTasks(prev => new Set(prev).add(taskId));
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setGeneratingSubtasks(null);
+    }
+  };
+
+  const saveSubtask = async (taskId: string, subtaskTitle: string) => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { error } = await supabase
+        .from('subtasks')
+        .insert([
+          {
+            task_id: taskId,
+            user_id: user.id,
+            title: subtaskTitle,
+          },
+        ]);
+
+      if (error) throw error;
+
+      fetchAllSubtasks();
+
+      setSuggestedSubtasks(prev => {
+        const updated = { ...prev };
+        updated[taskId] = updated[taskId].filter(s => s !== subtaskTitle);
+        return updated;
+      });
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  const toggleSubtask = async (subtaskId: string, completed: boolean) => {
+    try {
+      const { error } = await supabase
+        .from('subtasks')
+        .update({ completed: !completed })
+        .eq('id', subtaskId);
+
+      if (error) throw error;
+      fetchAllSubtasks();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  const deleteSubtask = async (subtaskId: string) => {
+    try {
+      const { error } = await supabase
+        .from('subtasks')
+        .delete()
+        .eq('id', subtaskId);
+
+      if (error) throw error;
+      fetchAllSubtasks();
+    } catch (err: any) {
+      setError(err.message);
+    }
+  };
+
+  const toggleTaskExpansion = (taskId: string) => {
+    setExpandedTasks(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(taskId)) {
+        newSet.delete(taskId);
+      } else {
+        newSet.add(taskId);
+      }
+      return newSet;
+    });
   };
 
   const handleLogout = async () => {
@@ -195,7 +336,7 @@ function Dashboard() {
               tasks.map((task) => (
                 <div
                   key={task.id}
-                  className="bg-blue-50 rounded-xl p-6 space-y-3 hover:shadow-lg transition-shadow"
+                  className="bg-blue-50 rounded-xl p-6 space-y-4 hover:shadow-lg transition-shadow"
                 >
                   <div className="flex items-start justify-between gap-4">
                     <h3 className="text-xl text-gray-800 font-semibold flex-1">
@@ -226,6 +367,80 @@ function Dashboard() {
                         <option value="done">Done</option>
                       </select>
                     </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <button
+                      onClick={() => generateSubtasks(task.id, task.title)}
+                      disabled={generatingSubtasks === task.id}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {generatingSubtasks === task.id ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Generating...
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4" />
+                          Generate Subtasks with AI
+                        </>
+                      )}
+                    </button>
+
+                    {suggestedSubtasks[task.id] && suggestedSubtasks[task.id].length > 0 && (
+                      <div className="bg-white rounded-lg p-4 space-y-2">
+                        <p className="text-sm font-semibold text-gray-700">Suggested Subtasks:</p>
+                        <ul className="space-y-2">
+                          {suggestedSubtasks[task.id].map((suggestion, idx) => (
+                            <li key={idx} className="flex items-center justify-between gap-2 text-sm">
+                              <span className="text-gray-700">{suggestion}</span>
+                              <button
+                                onClick={() => saveSubtask(task.id, suggestion)}
+                                className="px-3 py-1 bg-green-600 text-white text-xs font-semibold rounded hover:bg-green-700 transition-colors"
+                              >
+                                Save
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {subtasks[task.id] && subtasks[task.id].length > 0 && (
+                      <div className="space-y-2">
+                        <button
+                          onClick={() => toggleTaskExpansion(task.id)}
+                          className="text-sm font-semibold text-blue-600 hover:text-blue-700"
+                        >
+                          {expandedTasks.has(task.id) ? '▼' : '▶'} Subtasks ({subtasks[task.id].length})
+                        </button>
+
+                        {expandedTasks.has(task.id) && (
+                          <ul className="space-y-2 pl-4">
+                            {subtasks[task.id].map((subtask) => (
+                              <li key={subtask.id} className="flex items-center gap-2 text-sm">
+                                <input
+                                  type="checkbox"
+                                  checked={subtask.completed}
+                                  onChange={() => toggleSubtask(subtask.id, subtask.completed)}
+                                  className="w-4 h-4 text-blue-600 rounded focus:ring-2 focus:ring-blue-500 cursor-pointer"
+                                />
+                                <span className={`flex-1 ${subtask.completed ? 'line-through text-gray-500' : 'text-gray-700'}`}>
+                                  {subtask.title}
+                                </span>
+                                <button
+                                  onClick={() => deleteSubtask(subtask.id)}
+                                  className="text-red-600 hover:text-red-700 text-xs font-semibold"
+                                >
+                                  Delete
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               ))
