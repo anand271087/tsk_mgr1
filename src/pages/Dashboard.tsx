@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { Loader2, Sparkles } from 'lucide-react';
+import Profile from '../components/Profile';
 
 interface Task {
   id: string;
@@ -276,11 +277,13 @@ function Dashboard() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-400 via-blue-300 to-white py-12 px-6">
-      <div className="max-w-4xl mx-auto">
-        <div className="bg-white rounded-2xl shadow-2xl p-12 space-y-8">
-          <h1 className="text-5xl font-bold text-blue-600 text-center mb-8">
-            Your Tasks
-          </h1>
+      <div className="max-w-7xl mx-auto">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2">
+            <div className="bg-white rounded-2xl shadow-2xl p-12 space-y-8">
+              <h1 className="text-5xl font-bold text-blue-600 text-center mb-8">
+                Your Tasks
+              </h1>
 
           {error && (
             <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-lg">
@@ -447,13 +450,21 @@ function Dashboard() {
             )}
           </div>
 
-          <div className="pt-4">
-            <button
-              onClick={handleLogout}
-              className="w-full px-12 py-4 bg-white text-blue-600 border-2 border-blue-600 text-xl font-semibold rounded-xl shadow-lg hover:shadow-xl hover:bg-blue-50 hover:scale-105 transition-all duration-300"
-            >
-              Logout
-            </button>
+              <div className="pt-4">
+                <button
+                  onClick={handleLogout}
+                  className="w-full px-12 py-4 bg-white text-blue-600 border-2 border-blue-600 text-xl font-semibold rounded-xl shadow-lg hover:shadow-xl hover:bg-blue-50 hover:scale-105 transition-all duration-300"
+                >
+                  Logout
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div className="lg:col-span-1">
+            <div className="lg:sticky lg:top-6">
+              <Profile />
+            </div>
           </div>
         </div>
       </div>
